@@ -1,21 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 from pulsar.config import Settings
 from pulsar.provider_config import ProviderSpec, load_provider_specs
 from pulsar.providers.base import Provider
+from pulsar.providers.failover import FailoverCandidate, FailoverProvider, ProviderHealth
 from pulsar.providers.fallback import FallbackProvider
 from pulsar.providers.openai_compat import OpenAICompatibleProvider
 
 
-@dataclass(slots=True)
 class RouteDecision:
-    provider: Provider
-    provider_id: str
-    backend_model: str
-    score: float
+    def __init__(
+        self,
+        provider: Provider,
+        provider_id: str,
+        backend_model: str,
+        score: float,
+    ):
+        self.provider = provider
+        self.provider_id = provider_id
+        self.backend_model = backend_model
+        self.score = score
 
 
 class ModelRouter:
@@ -25,6 +31,7 @@ class ModelRouter:
         self.pulsar1: Provider | None = None
         self.providers: dict[str, Provider] = {}
         self.specs: dict[str, ProviderSpec] = {}
+        self.provider_health: dict[str, ProviderHealth] = {}
 
         if settings.model_checkpoint and Path(settings.model_checkpoint).exists():
             from pulsar.providers.pulsar1 import Pulsar1Provider
@@ -35,7 +42,6 @@ class ModelRouter:
         for spec in load_provider_specs(config_path):
             if not spec.enabled or spec.type != "openai-compatible" or not spec.base_url or not spec.model:
                 continue
-            # Local OpenAI-compatible servers can intentionally omit a key.
             if spec.api_key_env and not spec.api_key:
                 continue
             provider = OpenAICompatibleProvider(
@@ -46,8 +52,8 @@ class ModelRouter:
             )
             self.providers[spec.id] = provider
             self.specs[spec.id] = spec
+            self.provider_health.setdefault(spec.id, ProviderHealth())
 
-        # v0.2 compatibility: translate the legacy single-upstream environment into a provider.
         if (
             settings.allow_upstream
             and settings.upstream_base_url
@@ -70,6 +76,7 @@ class ModelRouter:
                 speed=60,
                 cost=50,
             )
+            self.provider_health.setdefault("legacy-upstream", ProviderHealth())
 
     def _native(self) -> RouteDecision:
         provider = self.pulsar1 or self.fallback
@@ -86,6 +93,23 @@ class ModelRouter:
         if effort == "deep":
             return spec.quality * 0.82 + (15 if spec.supports_reasoning else 0) + (100 - spec.cost) * 0.03
         return spec.quality * 0.9 + (15 if spec.supports_reasoning else 0)
+
+    def _ranked(self, effort: str) -> list[FailoverCandidate]:
+        ranked = sorted(
+            self.specs.values(),
+            key=lambda spec: self._score(spec, effort),
+            reverse=True,
+        )
+        return [
+            FailoverCandidate(
+                provider_id=spec.id,
+                backend_model=spec.model,
+                provider=self.providers[spec.id],
+                score=self._score(spec, effort),
+            )
+            for spec in ranked
+            if spec.id in self.providers
+        ]
 
     def route(self, model: str, effort: str = "standard") -> RouteDecision:
         if model in {"pulsar-1", "pulsar-native", "pulsar-1-fallback", "bootstrap"}:
@@ -113,13 +137,13 @@ class ModelRouter:
             "pulsar-max": "max",
             "pulsar-auto": effort,
         }[model]
-        ranked = sorted(
-            self.specs.values(),
-            key=lambda spec: self._score(spec, alias_effort),
-            reverse=True,
-        )
-        spec = ranked[0]
-        return RouteDecision(self.providers[spec.id], spec.id, spec.model, self._score(spec, alias_effort))
+        candidates = self._ranked(alias_effort)
+        primary = candidates[0]
+        if len(candidates) == 1:
+            return RouteDecision(primary.provider, primary.provider_id, primary.backend_model, primary.score)
+
+        failover = FailoverProvider(candidates, self.provider_health)
+        return RouteDecision(failover, primary.provider_id, primary.backend_model, primary.score)
 
     def resolve(self, model: str) -> Provider:
         return self.route(model).provider
@@ -161,6 +185,9 @@ class ModelRouter:
         return items
 
     def status(self) -> dict:
+        import time
+
+        now = time.monotonic()
         return {
             "native_checkpoint": self.pulsar1 is not None,
             "ready_providers": len(self.providers),
@@ -172,6 +199,13 @@ class ModelRouter:
                     "speed": spec.speed,
                     "privacy": spec.privacy,
                     "reasoning": spec.supports_reasoning,
+                    "health": {
+                        "failures": self.provider_health.setdefault(spec.id, ProviderHealth()).failures,
+                        "cooldown_seconds_remaining": round(
+                            max(0.0, self.provider_health[spec.id].cooldown_until - now), 2
+                        ),
+                        "last_error": self.provider_health[spec.id].last_error,
+                    },
                 }
                 for spec in sorted(self.specs.values(), key=lambda s: s.quality, reverse=True)
             ],
