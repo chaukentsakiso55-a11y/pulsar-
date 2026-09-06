@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pulsar Console</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #05070d; color: #e8f7ff; }
+    .shell { max-width: 1050px; margin: 0 auto; padding: 38px 20px 80px; }
+    .brand { font-size: 30px; font-weight: 800; letter-spacing: .04em; }
+    .sub { color: #94a7bd; margin-top: 6px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 16px; margin-top: 28px; }
+    .card { border: 1px solid #1f344d; background: linear-gradient(145deg,#0a101d,#080b14); border-radius: 18px; padding: 20px; box-shadow: 0 0 40px #00b7ff10 inset; }
+    h2 { margin: 0 0 14px; font-size: 17px; }
+    input, select, button { box-sizing: border-box; width: 100%; border-radius: 10px; border: 1px solid #29435f; background: #070c14; color: #e8f7ff; padding: 11px 12px; margin: 6px 0; }
+    button { cursor: pointer; background: #102b47; font-weight: 700; }
+    button:hover { background: #153b62; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #03060a; border-radius: 10px; border: 1px solid #17283c; min-height: 50px; }
+    .ok { color: #62ffbd; } .warn { color: #ffd36b; }
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid #1a2a3d; }
+    .wide { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand">⚡ PULSAR AI <span style="color:#6bdcff">CONSOLE</span></div>
+  <div class="sub">Pulsar Core v0.2 · API keys · model state · API test · usage</div>
+  <div class="grid">
+    <section class="card">
+      <h2>Server</h2>
+      <button onclick="health()">Check health</button>
+      <pre id="health">Not checked yet.</pre>
+    </section>
+    <section class="card">
+      <h2>Admin access</h2>
+      <input id="admin" type="password" placeholder="PULSAR_ADMIN_TOKEN" autocomplete="off" />
+      <button onclick="listKeys()">Load API keys</button>
+      <div class="sub">The token stays in this page's memory and is sent only as an admin header.</div>
+    </section>
+    <section class="card">
+      <h2>Create API key</h2>
+      <input id="keyname" placeholder="e.g. Star AI" />
+      <input id="limit" type="number" value="1000" min="1" />
+      <button onclick="createKey()">Create key</button>
+      <pre id="created">Raw keys are shown only once.</pre>
+    </section>
+    <section class="card">
+      <h2>Usage</h2>
+      <button onclick="usage()">Refresh usage</button>
+      <pre id="usage">No usage loaded.</pre>
+    </section>
+
+    <section class="card wide">
+      <h2>Test Pulsar API</h2>
+      <input id="apikey" type="password" placeholder="pulsar_live_..." autocomplete="off" />
+      <input id="prompt" placeholder="Ask Pulsar something..." value="Hello Pulsar" />
+      <button onclick="testChat()">Send test request</button>
+      <pre id="chatresult">Create or paste an API key, then test the server.</pre>
+    </section>
+    <section class="card wide">
+      <h2>API keys</h2>
+      <div id="keys">Load keys to view them.</div>
+    </section>
+  </div>
+</div>
+<script>
+const adminHeaders = () => ({'X-Pulsar-Admin': document.getElementById('admin').value, 'Content-Type':'application/json'});
+const pretty = x => JSON.stringify(x,null,2);
+async function health(){ const r=await fetch('/health'); document.getElementById('health').textContent=pretty(await r.json()); }
+async function createKey(){
+  const body={name:document.getElementById('keyname').value||'Pulsar Client',permissions:['chat'],daily_limit:Number(document.getElementById('limit').value||1000)};
+  const r=await fetch('/admin/api-keys',{method:'POST',headers:adminHeaders(),body:JSON.stringify(body)}); const d=await r.json(); document.getElementById('created').textContent=pretty(d); if(r.ok) listKeys();
+}
+async function listKeys(){
+  const r=await fetch('/admin/api-keys',{headers:adminHeaders()}); const d=await r.json();
+  if(!r.ok){document.getElementById('keys').textContent=pretty(d);return;}
+  const rows=d.data.map(k=>`<tr><td>${k.name}</td><td>${k.prefix}…</td><td>${k.daily_limit}</td><td>${k.revoked_at?'revoked':'active'}</td><td><button onclick="revoke('${k.id}')">Revoke</button></td></tr>`).join('');
+  document.getElementById('keys').innerHTML=`<table><thead><tr><th>Name</th><th>Prefix</th><th>Daily</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+async function revoke(id){ await fetch('/admin/api-keys/'+id+'/revoke',{method:'POST',headers:adminHeaders()}); listKeys(); }
+async function usage(){ const r=await fetch('/admin/usage',{headers:adminHeaders()}); document.getElementById('usage').textContent=pretty(await r.json()); }
+async function testChat(){
+  const key=document.getElementById('apikey').value.trim();
+  const prompt=document.getElementById('prompt').value||'Hello Pulsar';
+  const r=await fetch('/v1/responses',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'pulsar-1',input:prompt,max_output_tokens:256})});
+  document.getElementById('chatresult').textContent=pretty(await r.json());
+}
+
+health();
+</script>
+</body>
+</html>
