@@ -3,91 +3,70 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Pulsar Console</title>
+  <title>Pulsar Max Console</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #05070d; color: #e8f7ff; }
-    .shell { max-width: 1050px; margin: 0 auto; padding: 38px 20px 80px; }
-    .brand { font-size: 30px; font-weight: 800; letter-spacing: .04em; }
+    body { margin: 0; background: radial-gradient(circle at top,#0d1730 0,#05070d 42%); color: #e8f7ff; }
+    .shell { max-width: 1150px; margin: 0 auto; padding: 36px 20px 80px; }
+    .brand { font-size: 31px; font-weight: 900; letter-spacing: .04em; }
     .sub { color: #94a7bd; margin-top: 6px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 16px; margin-top: 28px; }
-    .card { border: 1px solid #1f344d; background: linear-gradient(145deg,#0a101d,#080b14); border-radius: 18px; padding: 20px; box-shadow: 0 0 40px #00b7ff10 inset; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(290px,1fr)); gap: 16px; margin-top: 28px; }
+    .card { border: 1px solid #1f3f62; background: linear-gradient(145deg,#0a101d,#080b14); border-radius: 18px; padding: 20px; box-shadow: 0 0 55px #00b7ff12 inset; }
     h2 { margin: 0 0 14px; font-size: 17px; }
-    input, select, button { box-sizing: border-box; width: 100%; border-radius: 10px; border: 1px solid #29435f; background: #070c14; color: #e8f7ff; padding: 11px 12px; margin: 6px 0; }
-    button { cursor: pointer; background: #102b47; font-weight: 700; }
+    input, select, textarea, button { box-sizing: border-box; width: 100%; border-radius: 10px; border: 1px solid #29435f; background: #070c14; color: #e8f7ff; padding: 11px 12px; margin: 6px 0; }
+    textarea { min-height: 92px; resize: vertical; }
+    button { cursor: pointer; background: #102b47; font-weight: 800; }
     button:hover { background: #153b62; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #03060a; border-radius: 10px; border: 1px solid #17283c; min-height: 50px; }
-    .ok { color: #62ffbd; } .warn { color: #ffd36b; }
     table { width:100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align:left; padding:8px; border-bottom:1px solid #1a2a3d; }
     .wide { grid-column: 1 / -1; }
+    .pill { display:inline-block; border:1px solid #315f86; border-radius:999px; padding:5px 9px; margin:3px; color:#8ee7ff; font-size:12px; }
   </style>
 </head>
 <body>
 <div class="shell">
-  <div class="brand">⚡ PULSAR AI <span style="color:#6bdcff">CONSOLE</span></div>
-  <div class="sub">Pulsar Core v0.2 · API keys · model state · API test · usage</div>
+  <div class="brand">⚡ PULSAR AI <span style="color:#6bdcff">MAX</span></div>
+  <div class="sub">v1.0 · multi-model routing · reasoning orchestration · verification · memory · knowledge retrieval</div>
+  <div><span class="pill">FAST</span><span class="pill">STANDARD</span><span class="pill">THINK</span><span class="pill">DEEP</span><span class="pill">MAX</span></div>
   <div class="grid">
-    <section class="card">
-      <h2>Server</h2>
-      <button onclick="health()">Check health</button>
-      <pre id="health">Not checked yet.</pre>
-    </section>
-    <section class="card">
-      <h2>Admin access</h2>
-      <input id="admin" type="password" placeholder="PULSAR_ADMIN_TOKEN" autocomplete="off" />
-      <button onclick="listKeys()">Load API keys</button>
-      <div class="sub">The token stays in this page's memory and is sent only as an admin header.</div>
-    </section>
-    <section class="card">
-      <h2>Create API key</h2>
-      <input id="keyname" placeholder="e.g. Star AI" />
-      <input id="limit" type="number" value="1000" min="1" />
-      <button onclick="createKey()">Create key</button>
-      <pre id="created">Raw keys are shown only once.</pre>
-    </section>
-    <section class="card">
-      <h2>Usage</h2>
-      <button onclick="usage()">Refresh usage</button>
-      <pre id="usage">No usage loaded.</pre>
+    <section class="card"><h2>Server</h2><button onclick="health()">Check health</button><pre id="health">Not checked yet.</pre></section>
+    <section class="card"><h2>Admin access</h2><input id="admin" type="password" placeholder="PULSAR_ADMIN_TOKEN" autocomplete="off" /><button onclick="providers()">Load provider status</button><pre id="providers">No provider status loaded.</pre></section>
+    <section class="card"><h2>Create API key</h2><input id="keyname" placeholder="e.g. Star AI" /><input id="limit" type="number" value="1000" min="1" /><button onclick="createKey()">Create key</button><pre id="created">Raw keys are shown only once.</pre></section>
+    <section class="card"><h2>Usage</h2><button onclick="usage()">Refresh usage</button><pre id="usage">No usage loaded.</pre></section>
+
+    <section class="card wide">
+      <h2>Test Pulsar Max</h2>
+      <input id="apikey" type="password" placeholder="pulsar_live_..." autocomplete="off" />
+      <select id="model"><option>pulsar-auto</option><option>pulsar-fast</option><option>pulsar-standard</option><option>pulsar-think</option><option>pulsar-deep</option><option selected>pulsar-max</option><option>pulsar-1</option></select>
+      <select id="effort"><option>fast</option><option>standard</option><option>think</option><option>deep</option><option selected>max</option></select>
+      <textarea id="prompt">Explain how an AI engine should route a difficult request, including verification.</textarea>
+      <button onclick="testChat()">Run Pulsar</button>
+      <pre id="chatresult">Paste an API key, then test Pulsar Max.</pre>
     </section>
 
     <section class="card wide">
-      <h2>Test Pulsar API</h2>
-      <input id="apikey" type="password" placeholder="pulsar_live_..." autocomplete="off" />
-      <input id="prompt" placeholder="Ask Pulsar something..." value="Hello Pulsar" />
-      <button onclick="testChat()">Send test request</button>
-      <pre id="chatresult">Create or paste an API key, then test the server.</pre>
+      <h2>Add knowledge</h2>
+      <input id="source" placeholder="Source / document name" value="Pulsar Console" />
+      <textarea id="knowledge" placeholder="Paste knowledge Pulsar should retrieve later..."></textarea>
+      <button onclick="addKnowledge()">Store knowledge</button>
+      <pre id="knowledgeResult">Nothing stored yet.</pre>
     </section>
-    <section class="card wide">
-      <h2>API keys</h2>
-      <div id="keys">Load keys to view them.</div>
-    </section>
+
+    <section class="card wide"><h2>API keys</h2><button onclick="listKeys()">Load keys</button><div id="keys">Load keys to view them.</div></section>
   </div>
 </div>
 <script>
 const adminHeaders = () => ({'X-Pulsar-Admin': document.getElementById('admin').value, 'Content-Type':'application/json'});
 const pretty = x => JSON.stringify(x,null,2);
 async function health(){ const r=await fetch('/health'); document.getElementById('health').textContent=pretty(await r.json()); }
-async function createKey(){
-  const body={name:document.getElementById('keyname').value||'Pulsar Client',permissions:['chat'],daily_limit:Number(document.getElementById('limit').value||1000)};
-  const r=await fetch('/admin/api-keys',{method:'POST',headers:adminHeaders(),body:JSON.stringify(body)}); const d=await r.json(); document.getElementById('created').textContent=pretty(d); if(r.ok) listKeys();
-}
-async function listKeys(){
-  const r=await fetch('/admin/api-keys',{headers:adminHeaders()}); const d=await r.json();
-  if(!r.ok){document.getElementById('keys').textContent=pretty(d);return;}
-  const rows=d.data.map(k=>`<tr><td>${k.name}</td><td>${k.prefix}…</td><td>${k.daily_limit}</td><td>${k.revoked_at?'revoked':'active'}</td><td><button onclick="revoke('${k.id}')">Revoke</button></td></tr>`).join('');
-  document.getElementById('keys').innerHTML=`<table><thead><tr><th>Name</th><th>Prefix</th><th>Daily</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-}
+async function providers(){ const r=await fetch('/admin/providers',{headers:adminHeaders()}); document.getElementById('providers').textContent=pretty(await r.json()); }
+async function createKey(){ const body={name:document.getElementById('keyname').value||'Pulsar Client',permissions:['chat','models','usage'],daily_limit:Number(document.getElementById('limit').value||1000)}; const r=await fetch('/admin/api-keys',{method:'POST',headers:adminHeaders(),body:JSON.stringify(body)}); const d=await r.json(); document.getElementById('created').textContent=pretty(d); if(r.ok) listKeys(); }
+async function listKeys(){ const r=await fetch('/admin/api-keys',{headers:adminHeaders()}); const d=await r.json(); if(!r.ok){document.getElementById('keys').textContent=pretty(d);return;} const rows=d.data.map(k=>`<tr><td>${k.name}</td><td>${k.prefix}…</td><td>${k.daily_limit}</td><td>${k.revoked_at?'revoked':'active'}</td><td><button onclick="revoke('${k.id}')">Revoke</button></td></tr>`).join(''); document.getElementById('keys').innerHTML=`<table><thead><tr><th>Name</th><th>Prefix</th><th>Daily</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`; }
 async function revoke(id){ await fetch('/admin/api-keys/'+id+'/revoke',{method:'POST',headers:adminHeaders()}); listKeys(); }
 async function usage(){ const r=await fetch('/admin/usage',{headers:adminHeaders()}); document.getElementById('usage').textContent=pretty(await r.json()); }
-async function testChat(){
-  const key=document.getElementById('apikey').value.trim();
-  const prompt=document.getElementById('prompt').value||'Hello Pulsar';
-  const r=await fetch('/v1/responses',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:'pulsar-1',input:prompt,max_output_tokens:256})});
-  document.getElementById('chatresult').textContent=pretty(await r.json());
-}
-
+async function testChat(){ const key=document.getElementById('apikey').value.trim(); const prompt=document.getElementById('prompt').value; const model=document.getElementById('model').value; const reasoning=document.getElementById('effort').value; const r=await fetch('/v1/responses',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model,input:prompt,reasoning,max_output_tokens:1400,verify:true,conversation_id:'console-demo'})}); document.getElementById('chatresult').textContent=pretty(await r.json()); }
+async function addKnowledge(){ const source=document.getElementById('source').value||'manual'; const content=document.getElementById('knowledge').value; const r=await fetch('/admin/knowledge',{method:'POST',headers:adminHeaders(),body:JSON.stringify({source,content,tags:['console']})}); document.getElementById('knowledgeResult').textContent=pretty(await r.json()); }
 health();
 </script>
 </body>

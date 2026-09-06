@@ -1,256 +1,129 @@
-# Pulsar AI v0.2 ⚡
+# Pulsar AI v1.0 — Pulsar Max
 
-Pulsar AI is a deployable AI platform consisting of **Pulsar Core**, **Pulsar API**, **Pulsar Console**, and the trainable **Pulsar-1** decoder-only Transformer.
+Pulsar AI is a self-hostable AI gateway and orchestration engine. It exposes one Pulsar API while routing work to a native Pulsar-1 checkpoint, local OpenAI-compatible model servers, or configured cloud model providers.
 
-## Fastest Windows setup
+## What changed in v1.0
 
-On Windows, extract the project and double-click:
+- **Pulsar Max orchestration** with `fast`, `standard`, `think`, `deep`, and `max` reasoning modes.
+- **Multi-provider routing** using quality/speed/cost/reasoning metadata.
+- **Expert synthesis + verification** for difficult requests.
+- **Conversation memory** stored in SQLite when a `conversation_id` is supplied.
+- **Knowledge retrieval** with an admin ingestion endpoint.
+- **OpenAI-compatible API surface** through `/v1/chat/completions` and `/v1/responses`.
+- **Secure Pulsar API keys** stored as hashes, with revocation and daily limits.
+- **Provider wizard** that keeps provider secrets in local `.env` only.
+- **Native Pulsar-1** transformer/training code remains available for research and future native models.
 
-```text
-PULSAR.bat
-```
+> Important: the orchestration software can make a strong backend more useful, but it cannot turn a tiny untrained model into a frontier model. Pulsar Max's ceiling depends heavily on the strongest model you connect or train.
 
-The Pulsar Control Center automatically:
+## Windows quick start
 
-- finds Python 3
-- creates `.venv`
-- upgrades pip
-- installs Pulsar Core + test dependencies
-- creates `.env` from `.env.example`
-- generates a strong random `PULSAR_ADMIN_TOKEN`
-- prepares data/checkpoint/log folders
-- gives you a menu to start/stop the server, open the console, create API keys, run tests, install model support, train checkpoints, or launch Docker
+1. Install Python 3.10+.
+2. Double-click `PULSAR.bat`.
+3. Let it create `.venv`, install Pulsar, and generate a local admin token.
+4. Choose **Configure / add a powerful model provider** to connect a local or cloud OpenAI-compatible backend.
+5. Choose **Create a Pulsar API key**.
+6. Start Pulsar and open `http://127.0.0.1:8000/console`.
 
-The generated admin token stays in your local `.env`. Use Control Center option **4** when you need to copy it into Pulsar Console.
+The provider wizard stores secrets in `.env`, which is ignored by Git. `configs/providers.local.json` is also ignored.
 
-## What works now
+## Model aliases
 
-- FastAPI server with OpenAI-style `/v1/chat/completions`
-- Responses-style `/v1/responses`
-- Server-generated `pulsar_live_...` API keys
-- Raw API keys shown once; only SHA-256 hashes are stored in the database
-- Per-key permissions, revocation and daily request limits
-- SQLite usage tracking
-- SSE streaming chat responses
-- Model registry and routing
-- Pulsar Console at `/console`
-- Built-in API test panel in Pulsar Console
-- Trainable byte-level Pulsar-1 Transformer in PyTorch
-- Optional OpenAI-compatible upstream provider
-- Docker deployment
-- Windows server process controller + PID tracking
-- Pulsar Doctor configuration checks
-- Automated tests for API keys, revocation, chat, Responses API and the model forward pass
+| Alias | Goal |
+|---|---|
+| `pulsar-fast` | Lowest latency / cost-weighted routing |
+| `pulsar-standard` | Balanced quality, speed, and cost |
+| `pulsar-think` | Planning pass + final answer |
+| `pulsar-deep` | Parallel expert drafts + synthesis + verification |
+| `pulsar-max` | Highest-quality route + multiple expert and verification passes |
+| `pulsar-auto` | Uses the request's reasoning setting |
+| `pulsar-1` | Native Pulsar checkpoint (or bootstrap provider if no checkpoint is loaded) |
 
-> **Important:** Pulsar-1 source code is included, but a useful learned model requires training. Until `PULSAR_MODEL_CHECKPOINT` points at a trained checkpoint, the API uses a bootstrap provider that proves the complete server/API pipeline works without pretending random weights are intelligent.
+## Provider configuration
 
-## Windows Control Center
+Run `PULSAR.bat` option **4**. The wizard asks for provider ID, OpenAI-compatible base URL, backend model ID, optional API key, quality/speed/cost scores, and reasoning capability. Secrets are stored only in `.env` and never in committed provider configuration.
 
-`PULSAR.bat` currently provides:
+## Create a Pulsar API key
 
-```text
-[1] Start Pulsar locally + open Console
-[2] Start Pulsar in server/LAN mode
-[3] Create a Pulsar API key
-[4] Show admin token
-[5] Run Pulsar Doctor
-[6] Run automated tests
-[7] Install/update Pulsar-1 model support (PyTorch)
-[8] Train quick dev checkpoint and activate it
-[9] Train Pulsar-1 Tiny checkpoint and activate it
-[10] Docker build and launch
-[11] Stop Pulsar server
-[0] Exit
-```
-
-### Local mode vs server mode
-
-**Local mode** binds to `127.0.0.1`, so only the current computer can connect.
-
-**Server/LAN mode** binds to `0.0.0.0`, allowing other devices that can reach the computer to connect on port `8000`. If Pulsar is exposed to the public Internet, place HTTPS and proper firewall/reverse-proxy protection in front of it.
-
-## Manual setup (Windows/Linux/macOS)
-
-Requires Python 3.10+.
+From `PULSAR.bat`, choose **Create a Pulsar API key**, or run:
 
 ```bash
-python -m venv .venv
+python -m pulsar.cli key create --name "Star AI" --permissions chat,models,usage --daily-limit 2000
 ```
 
-Windows:
+The raw `pulsar_live_...` key is shown once; only its SHA-256 hash is stored.
 
-```bat
-.venv\Scripts\activate
-pip install -e ".[dev]"
-copy .env.example .env
-python scripts\windows_setup.py prepare
-```
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-pip install -e '.[dev]'
-cp .env.example .env
-python scripts/windows_setup.py prepare
-```
-
-Start the API:
-
-```bash
-python -m uvicorn pulsar.main:app --host 127.0.0.1 --port 8000
-```
-
-Open:
-
-```text
-http://127.0.0.1:8000/console
-```
-
-## Create an API key
-
-### Control Center
-
-Use option **3** in `PULSAR.bat`.
-
-### Console
-
-Enter the `PULSAR_ADMIN_TOKEN`, name the client, and press **Create key**.
-
-### CLI
-
-```bash
-python -m pulsar.cli key create --name "Star AI" --daily-limit 2000
-```
-
-Pulsar prints the raw key once:
-
-```text
-pulsar_live_<random-secret>
-```
-
-Pulsar stores only its hash. If the raw key is lost, revoke it and create another.
-
-## Call the Chat Completions API
+## Pulsar Max API example
 
 ```python
 import requests
 
-API_KEY = "pulsar_live_YOUR_KEY"
-
-r = requests.post(
-    "http://127.0.0.1:8000/v1/chat/completions",
-    headers={"Authorization": f"Bearer {API_KEY}"},
-    json={
-        "model": "pulsar-1",
-        "messages": [{"role": "user", "content": "Hello Pulsar"}],
-        "stream": False,
-    },
-    timeout=60,
-)
-print(r.json())
-```
-
-## Call the Responses API
-
-```python
-import requests
-
-r = requests.post(
+response = requests.post(
     "http://127.0.0.1:8000/v1/responses",
     headers={"Authorization": "Bearer pulsar_live_YOUR_KEY"},
     json={
-        "model": "pulsar-1",
-        "input": "Explain gravity simply.",
-        "max_output_tokens": 256,
+        "model": "pulsar-max",
+        "input": "Design a reliable AI routing architecture.",
+        "reasoning": "max",
+        "verify": True,
+        "conversation_id": "project-42",
+        "max_output_tokens": 1600
     },
-    timeout=60,
 )
-print(r.json())
+print(response.json())
 ```
 
-## Train Pulsar-1
+Pulsar returns high-level routing metadata such as selected provider, backend model, reasoning effort, passes, and retrieved chunks. It does not expose private internal chain-of-thought.
 
-The Windows Control Center can install model dependencies and run training for you.
+## Endpoints
 
-Manual installation:
+- `GET /health`
+- `GET /console`
+- `GET /v1/models`
+- `GET /v1/usage`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `GET /admin/providers`
+- `GET /admin/api-keys`
+- `POST /admin/api-keys`
+- `POST /admin/api-keys/{id}/revoke`
+- `GET /admin/usage`
+- `POST /admin/knowledge`
 
-```bash
-pip install -r requirements-model.txt
-```
+## Native Pulsar-1
 
-Included configs:
+Pulsar-1 is a real decoder-only Transformer implementation in `model/`. The bundled tiny/dev configurations are for learning and testing, not frontier-grade pretrained checkpoints. Serious native intelligence requires properly licensed datasets, much larger models, GPU infrastructure, post-training, evals, and safety testing.
 
-- `configs/pulsar-1-dev.json` — tiny smoke-test model
-- `configs/pulsar-1-tiny.json` — approximately 11M parameters
-- `configs/pulsar-1-small.json` — approximately 38M parameters
+## Production deployment
 
-Replace `data/train.txt` with a **large, licensed/authorized training corpus** for meaningful training. The included data is deliberately tiny and is only for checking that the training pipeline works.
+For public deployment, use HTTPS behind a reverse proxy, rotate admin/provider secrets, restrict CORS, add firewall rules, use per-client API keys and rate limits, back up the database, and monitor provider costs. Do not expose `PULSAR_ADMIN_TOKEN` to client apps.
 
-Quick smoke test:
-
-```bash
-python -m model.train --config configs/pulsar-1-dev.json --data data/train.txt --steps 10 --batch-size 1 --out checkpoints/pulsar-1-dev.pt
-python scripts/windows_setup.py set-checkpoint checkpoints/pulsar-1-dev.pt
-```
-
-Restart the server to load the checkpoint.
-
-## Docker
-
-Prepare `.env`, then:
+Docker:
 
 ```bash
 docker compose up -d --build
 ```
 
-The standard Dockerfile runs Pulsar Core without PyTorch. `Dockerfile.model` installs model support for a trained Pulsar-1 checkpoint.
-
-## Production security checklist
-
-- Keep the admin token private.
-- Use HTTPS for any network-accessible deployment.
-- Never embed the admin token in Android APKs, browser JavaScript, or public desktop builds.
-- Give each application its own restricted API key.
-- Revoke leaked API keys immediately.
-- Keep `.env`, databases, checkpoints and private logs out of public repositories.
-- Use firewall/network rules for a public server.
-- For public mobile/web apps, prefer short-lived authenticated user sessions in front of long-lived service API keys.
-
-## API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/health` | Server and model health |
-| GET | `/console` | Pulsar Console |
-| GET | `/v1/models` | List available models |
-| GET | `/v1/usage` | Current key's daily usage |
-| POST | `/v1/chat/completions` | Chat completion, streaming or normal |
-| POST | `/v1/responses` | Simpler Responses-style generation |
-| GET | `/admin/api-keys` | List API-key metadata |
-| POST | `/admin/api-keys` | Create a key |
-| POST | `/admin/api-keys/{id}/revoke` | Revoke a key |
-| GET | `/admin/usage` | Aggregate usage |
-
 ## Architecture
 
 ```text
-Client apps
-    │
-    ▼
-Pulsar API
-    │
-    ├── API-key authentication
-    ├── permissions / limits
-    ├── usage tracking
-    ▼
-Pulsar Core / Model Router
-    │
-    ├── Pulsar-1 checkpoint
-    ├── Bootstrap provider
-    └── Optional upstream model
+Client
+  |
+  v
+Pulsar API + API key auth
+  |
+  v
+Pulsar Max Orchestrator
+  |-- conversation memory
+  |-- knowledge retrieval
+  |-- effort controller
+  |-- expert passes
+  |-- verification / revision
+  v
+Model Router
+  |-- strong cloud provider(s)
+  |-- local OpenAI-compatible model(s)
+  |-- native Pulsar-1
+  v
+Final answer + high-level route metadata
 ```
-
-## Version
-
-Pulsar AI v0.2.0

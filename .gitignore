@@ -3,9 +3,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+configs/providers.local.json
 data/*.db
 data/*.db-*
 checkpoints/*.pt
 logs/
 data/pulsar-server.pid
-.env

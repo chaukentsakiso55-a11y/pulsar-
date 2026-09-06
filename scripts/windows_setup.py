@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import secrets
@@ -55,12 +56,7 @@ def prepare() -> None:
 
     lines = _read_env(ENV_PATH)
     current = _get_value(lines, "PULSAR_ADMIN_TOKEN")
-    insecure = {
-        None,
-        "",
-        "replace-with-a-long-random-secret",
-        "change-me-before-production",
-    }
+    insecure = {None, "", "replace-with-a-long-random-secret", "change-me-before-production"}
     if current in insecure:
         token = "pulsar_admin_" + secrets.token_urlsafe(48)
         lines = _set_value(lines, "PULSAR_ADMIN_TOKEN", token)
@@ -69,9 +65,8 @@ def prepare() -> None:
     else:
         print("Existing PULSAR_ADMIN_TOKEN kept unchanged.")
 
-    (ROOT / "data").mkdir(parents=True, exist_ok=True)
-    (ROOT / "checkpoints").mkdir(parents=True, exist_ok=True)
-    (ROOT / "logs").mkdir(parents=True, exist_ok=True)
+    for directory in ["data", "checkpoints", "logs", "configs"]:
+        (ROOT / directory).mkdir(parents=True, exist_ok=True)
     print("Pulsar directories are ready.")
 
 
@@ -92,6 +87,47 @@ def set_checkpoint(value: str) -> None:
     print(f"PULSAR_MODEL_CHECKPOINT set to {value}")
 
 
+def _local_provider_config() -> Path:
+    lines = _read_env(ENV_PATH)
+    value = _get_value(lines, "PULSAR_PROVIDERS_FILE") or "configs/providers.local.json"
+    return ROOT / value
+
+
+def intelligence() -> None:
+    config_path = _local_provider_config()
+    print("\nPulsar Max Intelligence Status")
+    print("=" * 64)
+    if not config_path.exists():
+        print("[WARN] No powerful provider is configured yet.")
+        print("       Use PULSAR.bat option 4 to connect a strong local/cloud model.")
+    else:
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            providers = [p for p in data.get("providers", []) if p.get("enabled", True)]
+        except Exception as exc:
+            print(f"[FAIL] Provider config is invalid: {exc}")
+            providers = []
+        if providers:
+            for p in sorted(providers, key=lambda x: int(x.get("quality", 50)), reverse=True):
+                key_env = p.get("api_key_env", "")
+                secret_ready = (not key_env) or bool(os.getenv(key_env)) or bool(_get_value(_read_env(ENV_PATH), key_env))
+                print(
+                    f"[{'READY' if secret_ready else 'KEY MISSING'}] {p.get('id')} -> {p.get('model')} "
+                    f"quality={p.get('quality',50)} speed={p.get('speed',50)} privacy={p.get('privacy','cloud')}"
+                )
+        else:
+            print("[WARN] Provider config contains no enabled providers.")
+
+    lines = _read_env(ENV_PATH)
+    checkpoint = _get_value(lines, "PULSAR_MODEL_CHECKPOINT") or ""
+    if checkpoint:
+        print(f"[{'READY' if (ROOT / checkpoint).exists() else 'MISSING'}] Native Pulsar-1 checkpoint: {checkpoint}")
+    else:
+        print("[INFO] Native Pulsar-1 checkpoint not configured.")
+    print("\nPulsar Max modes: pulsar-fast, pulsar-standard, pulsar-think, pulsar-deep, pulsar-max")
+    print("Note: frontier-level quality depends on the quality of the configured backend model(s).")
+
+
 def doctor() -> None:
     checks: list[tuple[str, bool, str]] = []
     checks.append(("Python >= 3.10", sys.version_info >= (3, 10), platform.python_version()))
@@ -109,10 +145,11 @@ def doctor() -> None:
         ))
         checkpoint = _get_value(lines, "PULSAR_MODEL_CHECKPOINT") or ""
         if checkpoint:
-            checkpoint_path = ROOT / checkpoint
-            checks.append(("model checkpoint", checkpoint_path.exists(), checkpoint))
+            checks.append(("model checkpoint", (ROOT / checkpoint).exists(), checkpoint))
         else:
-            checks.append(("model checkpoint", True, "not configured (bootstrap provider will be used)"))
+            checks.append(("model checkpoint", True, "optional; Pulsar Max can route to configured providers"))
+        provider_path = _local_provider_config()
+        checks.append(("provider config", True, str(provider_path) if provider_path.exists() else "not configured yet (optional)"))
 
     failed = False
     print("\nPulsar AI Doctor")
@@ -131,6 +168,7 @@ def main() -> None:
     sub.add_parser("prepare")
     sub.add_parser("show-admin")
     sub.add_parser("doctor")
+    sub.add_parser("intelligence")
     checkpoint = sub.add_parser("set-checkpoint")
     checkpoint.add_argument("path")
     args = parser.parse_args()
@@ -142,6 +180,8 @@ def main() -> None:
         show_admin()
     elif args.command == "doctor":
         doctor()
+    elif args.command == "intelligence":
+        intelligence()
     elif args.command == "set-checkpoint":
         set_checkpoint(args.path)
 

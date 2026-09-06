@@ -1,0 +1,34 @@
+{
+  "providers": [
+    {
+      "id": "example-frontier",
+      "type": "openai-compatible",
+      "base_url": "https://YOUR-PROVIDER.example/v1",
+      "api_key_env": "PULSAR_PROVIDER_EXAMPLE_API_KEY",
+      "model": "YOUR_STRONGEST_MODEL",
+      "enabled": false,
+      "quality": 100,
+      "speed": 60,
+      "cost": 70,
+      "privacy": "cloud",
+      "supports_reasoning": true,
+      "supports_tools": false,
+      "notes": "Template only. Copy/configure locally with PULSAR.bat; never commit secrets."
+    },
+    {
+      "id": "example-local",
+      "type": "openai-compatible",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key_env": "",
+      "model": "YOUR_LOCAL_MODEL",
+      "enabled": false,
+      "quality": 75,
+      "speed": 75,
+      "cost": 5,
+      "privacy": "local",
+      "supports_reasoning": true,
+      "supports_tools": false,
+      "notes": "Example for a local OpenAI-compatible model server."
+    }
+  ]
+}

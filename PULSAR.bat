@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Pulsar AI Control Center
+title Pulsar AI v1.0 - Pulsar Max Control Center
 
 set "VENV_PY=%CD%\.venv\Scripts\python.exe"
 
@@ -17,14 +17,16 @@ call :banner
 echo  [1] Start Pulsar locally + open Console
 echo  [2] Start Pulsar in server/LAN mode
 echo  [3] Create a Pulsar API key
-echo  [4] Show admin token
-echo  [5] Run Pulsar Doctor
-echo  [6] Run automated tests
-echo  [7] Install / update Pulsar-1 model support (PyTorch)
-echo  [8] Train quick dev checkpoint and activate it
-echo  [9] Train Pulsar-1 Tiny checkpoint and activate it
-echo [10] Docker build and launch
-echo [11] Stop Pulsar server window
+echo  [4] Configure / add a powerful model provider
+echo  [5] Show Pulsar Max intelligence status
+echo  [6] Show admin token
+echo  [7] Run Pulsar Doctor
+echo  [8] Run automated tests
+echo  [9] Install / update Pulsar-1 model support (PyTorch)
+echo [10] Train quick Pulsar-1 dev checkpoint and activate it
+echo [11] Train Pulsar-1 Tiny checkpoint and activate it
+echo [12] Docker build and launch
+echo [13] Stop Pulsar server
 echo  [0] Exit
 echo.
 set /p "choice=Choose an option: "
@@ -32,21 +34,23 @@ set /p "choice=Choose an option: "
 if "%choice%"=="1" goto :start_local
 if "%choice%"=="2" goto :start_server
 if "%choice%"=="3" goto :create_key
-if "%choice%"=="4" goto :show_admin
-if "%choice%"=="5" goto :doctor
-if "%choice%"=="6" goto :tests
-if "%choice%"=="7" goto :model_deps
-if "%choice%"=="8" goto :train_dev
-if "%choice%"=="9" goto :train_tiny
-if "%choice%"=="10" goto :docker
-if "%choice%"=="11" goto :stop_server
+if "%choice%"=="4" goto :provider
+if "%choice%"=="5" goto :intelligence
+if "%choice%"=="6" goto :show_admin
+if "%choice%"=="7" goto :doctor
+if "%choice%"=="8" goto :tests
+if "%choice%"=="9" goto :model_deps
+if "%choice%"=="10" goto :train_dev
+if "%choice%"=="11" goto :train_tiny
+if "%choice%"=="12" goto :docker
+if "%choice%"=="13" goto :stop_server
 if "%choice%"=="0" exit /b 0
 goto :menu
 
 :banner
 echo ================================================================
-echo                       PULSAR AI v0.2
-echo                    Windows Control Center
+echo                       PULSAR AI v1.0
+echo                 PULSAR MAX CONTROL CENTER
 echo ================================================================
 echo.
 exit /b 0
@@ -86,7 +90,7 @@ echo [SETUP] Installing/updating Pulsar Core dependencies...
 if errorlevel 1 exit /b 1
 "%VENV_PY%" -m pip install -e ".[dev]"
 if errorlevel 1 exit /b 1
-echo [OK] Pulsar Core is installed.
+echo [OK] Pulsar Core v1 is installed.
 exit /b 0
 
 :start_local
@@ -95,7 +99,7 @@ exit /b 0
 timeout /t 2 /nobreak >nul
 start "" "http://127.0.0.1:8000/console"
 echo.
-echo Pulsar is starting locally at http://127.0.0.1:8000
+echo Pulsar Max is starting locally at http://127.0.0.1:8000
 pause
 goto :menu
 
@@ -106,7 +110,7 @@ timeout /t 2 /nobreak >nul
 start "" "http://127.0.0.1:8000/console"
 echo.
 echo Pulsar is listening on port 8000 for this PC and your LAN.
-echo For public Internet deployment, put HTTPS/reverse-proxy protection in front of it.
+echo Use HTTPS and a reverse proxy before public Internet exposure.
 pause
 goto :menu
 
@@ -118,10 +122,20 @@ if not defined keyname set "keyname=Pulsar Client"
 set /p "limit=Daily request limit [1000]: "
 if not defined limit set "limit=1000"
 echo.
-"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat
+"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat,models,usage
 if errorlevel 1 echo [ERROR] API key creation failed.
 echo.
 echo Copy the raw key now; Pulsar will not be able to display it again.
+pause
+goto :menu
+
+:provider
+"%VENV_PY%" scripts\configure_provider.py
+pause
+goto :menu
+
+:intelligence
+"%VENV_PY%" scripts\windows_setup.py intelligence
 pause
 goto :menu
 
@@ -167,8 +181,8 @@ goto :menu
 :train_tiny
 call :ensure_model_deps || goto :train_failed
 echo.
-echo Pulsar-1 Tiny is much larger than the dev smoke-test model.
-echo Training speed depends heavily on your CPU/GPU and dataset.
+echo Pulsar-1 Tiny is a learning model, not a frontier model.
+echo Pulsar Max gets high intelligence from strong configured providers plus orchestration.
 set /p "steps=Training steps [500]: "
 if not defined steps set "steps=500"
 "%VENV_PY%" -m model.train --config configs/pulsar-1-tiny.json --data data/train.txt --steps %steps% --batch-size 1 --out checkpoints/pulsar-1-tiny.pt
