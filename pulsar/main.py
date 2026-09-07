@@ -5,15 +5,16 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from pulsar.config import Settings
 from pulsar.db import Database
+from pulsar.documents import MAX_DOCUMENT_BYTES, chunk_document, extract_document_text
 from pulsar.orchestrator import PulsarOrchestrator
 from pulsar.router import ModelRouter
-from pulsar.schemas import ChatCompletionRequest, CreateKeyRequest, KnowledgeRequest, ResponseRequest
+from pulsar.schemas import ChatCompletionRequest, CreateKeyRequest, KnowledgeRequest, ResponseRequest, ToolCallRequest
 from pulsar.security import hash_api_key, new_api_key, secure_equal
 from pulsar.version import __version__
 
@@ -35,7 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Pulsar AI API",
         version=__version__,
-        description="Pulsar Max orchestration engine + Pulsar-1 native model + OpenAI-compatible provider routing",
+        description="Pulsar Max orchestration engine + safe tools + document RAG + Pulsar-1 native model + OpenAI-compatible provider routing",
     )
     app.state.settings = settings
     app.state.db = db
@@ -66,6 +67,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=429, detail="Daily request limit reached")
         return record
 
+    def require_permission(key: dict, permission: str) -> None:
+        if permission not in key["permissions"] and "*" not in key["permissions"]:
+            raise HTTPException(status_code=403, detail=f"API key lacks {permission} permission")
+
     @app.get("/health")
     def health() -> dict:
         status = router.status()
@@ -77,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "pulsar_1_checkpoint_loaded": router.pulsar1 is not None,
             "pulsar_max_ready": bool(status["ready_providers"] or status["native_checkpoint"]),
             "ready_providers": status["ready_providers"],
+            "tools": orchestrator.tools.names(),
         }
 
     @app.get("/", response_class=HTMLResponse)
@@ -93,7 +99,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def usage(key: dict = Depends(require_key)) -> dict:
         return {"key_id": key["id"], "today_requests": db.usage_today(key["id"]), "daily_limit": key["daily_limit"]}
 
-    async def execute(messages, model, effort, max_tokens, temperature, conversation_id, verify):
+    @app.get("/v1/tools")
+    def tools(key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "tools")
+        return {"object": "list", "data": orchestrator.tools.definitions()}
+
+    @app.post("/v1/tools/call")
+    def tool_call(body: ToolCallRequest, key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "tools")
+        try:
+            result = orchestrator.tools.execute(body.name, body.arguments)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, TypeError, ArithmeticError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.record_usage(key["id"], "/v1/tools/call", body.name, 0, 0, "pulsar-tool", "tool", 1)
+        return {"object": "tool.result", "name": result.name, "output": result.output}
+
+    async def execute(messages, model, effort, max_tokens, temperature, conversation_id, verify, enable_tools):
         try:
             return await orchestrator.run(
                 messages=messages,
@@ -103,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 temperature=temperature,
                 conversation_id=conversation_id,
                 verify=verify,
+                enable_tools=enable_tools,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -111,8 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/v1/chat/completions")
     async def chat_completions(body: ChatCompletionRequest, key: dict = Depends(require_key)):
-        if "chat" not in key["permissions"] and "*" not in key["permissions"]:
-            raise HTTPException(status_code=403, detail="API key lacks chat permission")
+        require_permission(key, "chat")
 
         prompt_text = "\n".join(m.content for m in body.messages)
         prompt_tokens = approx_tokens(prompt_text)
@@ -120,7 +143,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         created = int(time.time())
         result = await execute(
             body.messages, body.model, body.reasoning_effort, body.max_tokens,
-            body.temperature, body.conversation_id, body.verify,
+            body.temperature, body.conversation_id, body.verify, body.enable_tools,
         )
         completion_tokens = approx_tokens(result.text)
         db.record_usage(
@@ -157,19 +180,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reasoning_effort": result.effort,
                 "passes": result.passes,
                 "retrieved_chunks": result.retrieved_chunks,
+                "tools_used": result.tools_used,
             },
             "system_fingerprint": f"pulsar-ai-v{__version__}",
         }
 
     @app.post("/v1/responses")
     async def responses(body: ResponseRequest, key: dict = Depends(require_key)) -> dict:
-        if "chat" not in key["permissions"] and "*" not in key["permissions"]:
-            raise HTTPException(status_code=403, detail="API key lacks chat permission")
+        require_permission(key, "chat")
         messages = body.as_messages()
         prompt_text = "\n".join(m.content for m in messages)
         result = await execute(
             messages, body.model, body.reasoning, body.max_output_tokens,
-            body.temperature, body.conversation_id, body.verify,
+            body.temperature, body.conversation_id, body.verify, body.enable_tools,
         )
         input_tokens = approx_tokens(prompt_text)
         output_tokens = approx_tokens(result.text)
@@ -192,6 +215,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "passes": result.passes,
                 "retrieved_chunks": result.retrieved_chunks,
                 "route_score": result.route_score,
+                "tools_used": result.tools_used,
             },
         }
 
@@ -201,7 +225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/admin/api-keys", dependencies=[Depends(require_admin)])
     def admin_create_key(body: CreateKeyRequest) -> dict:
-        allowed_permissions = {"chat", "models", "usage", "knowledge", "*"}
+        allowed_permissions = {"chat", "models", "usage", "knowledge", "tools", "*"}
         bad = [p for p in body.permissions if p not in allowed_permissions]
         if bad:
             raise HTTPException(status_code=400, detail=f"Unknown permissions: {bad}")
@@ -231,6 +255,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_knowledge(body: KnowledgeRequest) -> dict:
         chunk_id = db.add_knowledge(body.source, body.content, body.tags)
         return {"id": chunk_id, "stored": True, "source": body.source}
+
+    @app.post("/admin/knowledge/file", dependencies=[Depends(require_admin)])
+    async def admin_knowledge_file(
+        file: UploadFile = File(...),
+        tags: str = Form(default=""),
+    ) -> dict:
+        raw = await file.read(MAX_DOCUMENT_BYTES + 1)
+        if len(raw) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail="Document exceeds the 10 MB ingestion limit")
+        filename = file.filename or "document.txt"
+        try:
+            text = extract_document_text(filename, raw)
+            chunks = chunk_document(text)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except ValueError as exc:
+            status = 415 if "Unsupported document type" in str(exc) else 400
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Document produced no searchable text")
+
+        parsed_tags = [item.strip() for item in tags.split(",") if item.strip()][:20]
+        base_source = filename[:150]
+        ids = [
+            db.add_knowledge(f"{base_source}#chunk-{index}", chunk, parsed_tags)
+            for index, chunk in enumerate(chunks, start=1)
+        ]
+        return {
+            "stored": True,
+            "filename": filename,
+            "chunks": len(ids),
+            "characters": len(text),
+            "ids": ids,
+        }
 
     return app
 

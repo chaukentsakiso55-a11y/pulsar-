@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from email.utils import parsedate_to_datetime
 from time import time
+from typing import Any
 
 import httpx
 
-from pulsar.providers.base import Provider
+from pulsar.providers.base import Provider, ProviderToolResult, ToolCall
 from pulsar.schemas import Message
 
 _RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
@@ -49,29 +51,7 @@ class OpenAICompatibleProvider(Provider):
                         pass
         return min(2.0, 0.25 * (2**attempt))
 
-    @staticmethod
-    def _extract_content(data: dict) -> str:
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ProviderRequestError("Provider returned an invalid chat-completions response") from exc
-        if isinstance(content, str):
-            return content
-        return str(content)
-
-    async def generate(
-        self,
-        messages: list[Message],
-        max_tokens: int,
-        temperature: float,
-    ) -> str:
-        payload = {
-            "model": self.model,
-            "messages": [m.model_dump() for m in messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False,
-        }
+    async def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -88,7 +68,10 @@ class OpenAICompatibleProvider(Provider):
                     )
                     if response.status_code not in _RETRYABLE_STATUS:
                         response.raise_for_status()
-                        return self._extract_content(response.json())
+                        data = response.json()
+                        if not isinstance(data, dict):
+                            raise ProviderRequestError("Provider returned a non-object JSON response")
+                        return data
                     last_error = httpx.HTTPStatusError(
                         f"retryable provider status {response.status_code}",
                         request=response.request,
@@ -109,3 +92,87 @@ class OpenAICompatibleProvider(Provider):
         raise ProviderRequestError(
             f"Provider {self.name} failed after {self.max_retries + 1} attempt(s): {detail}"
         ) from last_error
+
+    @staticmethod
+    def _message(data: dict[str, Any]) -> dict[str, Any]:
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ProviderRequestError("Provider returned an invalid chat-completions response") from exc
+        if not isinstance(message, dict):
+            raise ProviderRequestError("Provider returned an invalid message object")
+        return message
+
+    @classmethod
+    def _extract_content(cls, data: dict[str, Any]) -> str:
+        content = cls._message(data).get("content", "")
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        return str(content)
+
+    @classmethod
+    def _extract_tool_result(cls, data: dict[str, Any]) -> ProviderToolResult:
+        message = cls._message(data)
+        content = message.get("content") or ""
+        calls: list[ToolCall] = []
+        raw_calls = message.get("tool_calls") or []
+        if not isinstance(raw_calls, list):
+            raise ProviderRequestError("Provider returned invalid tool_calls")
+        for raw in raw_calls:
+            if not isinstance(raw, dict):
+                continue
+            function = raw.get("function") or {}
+            if not isinstance(function, dict):
+                continue
+            name = str(function.get("name") or "").strip()
+            if not name:
+                continue
+            raw_arguments = function.get("arguments", "{}")
+            if isinstance(raw_arguments, dict):
+                arguments = raw_arguments
+            else:
+                try:
+                    parsed = json.loads(str(raw_arguments or "{}"))
+                except json.JSONDecodeError as exc:
+                    raise ProviderRequestError(f"Provider returned invalid JSON arguments for tool {name}") from exc
+                if not isinstance(parsed, dict):
+                    raise ProviderRequestError(f"Tool arguments for {name} must be a JSON object")
+                arguments = parsed
+            calls.append(ToolCall(id=str(raw.get("id") or f"call_{len(calls)+1}"), name=name, arguments=arguments))
+        return ProviderToolResult(content=str(content), tool_calls=calls)
+
+    async def generate(
+        self,
+        messages: list[Message],
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        payload = {
+            "model": self.model,
+            "messages": [m.model_dump(exclude_none=True) for m in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+        }
+        return self._extract_content(await self._post_chat(payload))
+
+    async def generate_with_tools(
+        self,
+        messages: list[Message],
+        max_tokens: int,
+        temperature: float,
+        tools: list[dict[str, Any]],
+        tool_choice: str | dict[str, Any] = "auto",
+    ) -> ProviderToolResult:
+        payload = {
+            "model": self.model,
+            "messages": [m.model_dump(exclude_none=True) for m in messages],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+            "tools": tools,
+            "tool_choice": tool_choice,
+        }
+        return self._extract_tool_result(await self._post_chat(payload))

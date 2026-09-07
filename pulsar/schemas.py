@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ class ChatCompletionRequest(BaseModel):
     reasoning_effort: ReasoningEffort = "standard"
     verify: bool = True
     conversation_id: str | None = Field(default=None, max_length=120)
+    enable_tools: bool = False
 
 
 class ResponseRequest(BaseModel):
@@ -32,6 +33,7 @@ class ResponseRequest(BaseModel):
     reasoning: ReasoningEffort = "standard"
     verify: bool = True
     conversation_id: str | None = Field(default=None, max_length=120)
+    enable_tools: bool = False
 
     def as_messages(self) -> list[Message]:
         if isinstance(self.input, str):
@@ -49,3 +51,8 @@ class KnowledgeRequest(BaseModel):
     source: str = Field(default="manual", min_length=1, max_length=200)
     content: str = Field(min_length=1, max_length=200_000)
     tags: list[str] = Field(default_factory=list)
+
+
+class ToolCallRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    arguments: dict[str, Any] = Field(default_factory=dict)

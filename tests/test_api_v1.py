@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from pulsar.config import Settings
 from pulsar.main import create_app
+from pulsar.version import __version__
 
 
 def client(tmp_path: Path) -> TestClient:
@@ -31,7 +32,7 @@ def make_key(c: TestClient) -> str:
 
 def test_v1_health_and_models(tmp_path):
     c = client(tmp_path)
-    assert c.get("/health").json()["version"] == "1.0.0"
+    assert c.get("/health").json()["version"] == __version__
     key = make_key(c)
     data = c.get("/v1/models", headers={"Authorization":f"Bearer {key}"}).json()["data"]
     ids = {x["id"] for x in data}

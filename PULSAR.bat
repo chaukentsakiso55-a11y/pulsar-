@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Pulsar AI v1.0 - Pulsar Max Control Center
+title Pulsar AI v1.1 - Pulsar Max Control Center
 
 set "VENV_PY=%CD%\.venv\Scripts\python.exe"
 
@@ -49,7 +49,7 @@ goto :menu
 
 :banner
 echo ================================================================
-echo                       PULSAR AI v1.0
+echo                       PULSAR AI v1.1
 echo                 PULSAR MAX CONTROL CENTER
 echo ================================================================
 echo.
@@ -122,7 +122,7 @@ if not defined keyname set "keyname=Pulsar Client"
 set /p "limit=Daily request limit [1000]: "
 if not defined limit set "limit=1000"
 echo.
-"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat,models,usage
+"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat,models,usage,tools
 if errorlevel 1 echo [ERROR] API key creation failed.
 echo.
 echo Copy the raw key now; Pulsar will not be able to display it again.
