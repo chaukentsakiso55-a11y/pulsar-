@@ -1,7 +1,7 @@
 [project]
 name = "pulsar-ai"
-version = "1.2.0"
-description = "Pulsar AI v1.2: Pulsar Max web research, embeddings, semantic memory, safe tools, document RAG and model routing"
+version = "1.2.1"
+description = "Pulsar AI v1.2.1: Pulsar Max web research, embeddings, semantic memory, safe tools, document RAG and model routing"
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.128,<1",
