@@ -1,4 +1,4 @@
-# Pulsar AI v1.2 — Pulsar Max
+# Pulsar AI v1.2.1 — Pulsar Max
 
 Pulsar AI is a self-hostable AI gateway and orchestration engine. It exposes one API while routing work to native Pulsar-1 checkpoints, local OpenAI-compatible model servers, or configured cloud model providers.
 
@@ -18,6 +18,7 @@ Pulsar AI is a self-hostable AI gateway and orchestration engine. It exposes one
 - secure Pulsar API keys with permissions, revocation and daily limits
 - Docker/server deployment and a Windows control center
 - native Pulsar-1 transformer/training code for research
+- integrated model presets for Qwen3, Llama 3.2, DeepSeek-R1, Gemma 3, and vLLM-served Qwen3
 
 > Pulsar Max can orchestrate a strong backend, but orchestration cannot turn a tiny untrained native checkpoint into a frontier model. Native model quality still depends on model size, data, compute, post-training and evaluation.
 
@@ -26,12 +27,25 @@ Pulsar AI is a self-hostable AI gateway and orchestration engine. It exposes one
 1. Install Python 3.10+.
 2. Double-click `PULSAR.bat`.
 3. Let it create `.venv`, install Pulsar, and generate a local admin token.
-4. Configure a strong model provider with option **4**.
+4. Configure a strong model provider with option **4**, or use integrated model presets with option **15**.
 5. Optionally configure web research + embeddings with option **14**.
 6. Create a Pulsar API key.
 7. Start Pulsar and open `http://127.0.0.1:8000/console`.
 
 Secrets are stored in local `.env`. `configs/providers.local.json`, `.env`, databases and checkpoints are Git-ignored.
+
+## Integrated model presets
+
+`PULSAR.bat` option **15** adds curated local model presets without manually editing provider JSON. Current presets include:
+
+- Qwen3 1.7B via Ollama
+- Llama 3.2 3B via Ollama
+- DeepSeek-R1 1.5B via Ollama
+- Gemma 3 1B via Ollama
+- Qwen3 8B via Ollama
+- Qwen3 8B via vLLM
+
+The wizard can optionally run `ollama pull`, saves the provider into `configs/providers.local.json`, probes `/v1/models`, and preserves any providers already configured. Multiple model backends can coexist so Pulsar Max can rank and fail over between them. Model weights are not bundled in the source ZIP.
 
 ## Model aliases
 
@@ -147,6 +161,6 @@ Pulsar's built-in tool registry does **not** enable arbitrary shell commands, de
 python -m pytest -q
 ```
 
-v1.2 adds regression coverage for embeddings, semantic memory, web-research permission boundaries and URL filtering in addition to the existing API/router/tool/RAG/model tests.
+v1.2.1 adds regression coverage for integrated model presets on top of the existing embeddings, semantic memory, web research, API/router/tool/RAG/model tests.
 
-See `docs/V1.1.md` and `docs/V1.2.md` for release-specific details.
+See `docs/V1.1.md`, `docs/V1.2.md`, and `docs/V1.2.1.md` for release-specific details.
