@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
-title Pulsar AI v1.1 - Pulsar Max Control Center
+title Pulsar AI v1.2 - Pulsar Max Control Center
 
 set "VENV_PY=%CD%\.venv\Scripts\python.exe"
 
@@ -27,6 +27,7 @@ echo [10] Train quick Pulsar-1 dev checkpoint and activate it
 echo [11] Train Pulsar-1 Tiny checkpoint and activate it
 echo [12] Docker build and launch
 echo [13] Stop Pulsar server
+echo [14] Configure Web Research + Embeddings
 echo  [0] Exit
 echo.
 set /p "choice=Choose an option: "
@@ -44,12 +45,13 @@ if "%choice%"=="10" goto :train_dev
 if "%choice%"=="11" goto :train_tiny
 if "%choice%"=="12" goto :docker
 if "%choice%"=="13" goto :stop_server
+if "%choice%"=="14" goto :configure_v12
 if "%choice%"=="0" exit /b 0
 goto :menu
 
 :banner
 echo ================================================================
-echo                       PULSAR AI v1.1
+echo                       PULSAR AI v1.2
 echo                 PULSAR MAX CONTROL CENTER
 echo ================================================================
 echo.
@@ -122,7 +124,7 @@ if not defined keyname set "keyname=Pulsar Client"
 set /p "limit=Daily request limit [1000]: "
 if not defined limit set "limit=1000"
 echo.
-"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat,models,usage,tools
+"%VENV_PY%" -m pulsar.cli key create --name "%keyname%" --daily-limit %limit% --permissions chat,models,usage,tools,embeddings,research,memory
 if errorlevel 1 echo [ERROR] API key creation failed.
 echo.
 echo Copy the raw key now; Pulsar will not be able to display it again.
@@ -218,6 +220,11 @@ if errorlevel 1 (
     echo [OK] Pulsar Docker services launched.
     start "" "http://127.0.0.1:8000/console"
 )
+pause
+goto :menu
+
+:configure_v12
+"%VENV_PY%" scripts\configure_intelligence.py
 pause
 goto :menu
 

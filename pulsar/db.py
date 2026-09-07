@@ -68,10 +68,23 @@ class Database:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS semantic_memories (
+                    id TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    vector TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_usage_key_created
                 ON usage_events(key_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_conversation_id
                 ON conversation_messages(conversation_id, id);
+                CREATE INDEX IF NOT EXISTS idx_semantic_namespace_created
+                ON semantic_memories(namespace, created_at);
                 """
             )
             # Lightweight migrations for databases created by Pulsar v0.2.
@@ -204,6 +217,43 @@ class Database:
                 scored.append((score, row))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [dict(row) | {"score": score, "tags": json.loads(row["tags"])} for score, row in scored[:limit]]
+
+    def add_semantic_memory(
+        self,
+        namespace: str,
+        source: str,
+        content: str,
+        vector: list[float],
+        model: str,
+    ) -> str:
+        memory_id = f"mem_{uuid.uuid4().hex[:20]}"
+        with self._lock, self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO semantic_memories
+                (id, namespace, source, content, vector, model, dimensions, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    memory_id, namespace[:120], source[:80], content[:100_000], json.dumps(vector),
+                    model[:200], len(vector), datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        return memory_id
+
+    def list_semantic_memories(self, namespace: str, limit: int = 1200) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, namespace, source, content, vector, model, dimensions, created_at
+                FROM semantic_memories
+                WHERE namespace = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (namespace, min(5000, max(1, int(limit)))),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def add_message(self, conversation_id: str, role: str, content: str) -> None:
         with self._lock, self.connect() as conn:

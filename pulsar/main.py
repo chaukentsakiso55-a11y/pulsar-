@@ -12,11 +12,24 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pulsar.config import Settings
 from pulsar.db import Database
 from pulsar.documents import MAX_DOCUMENT_BYTES, chunk_document, extract_document_text
+from pulsar.embeddings import EmbeddingClient, EmbeddingError
 from pulsar.orchestrator import PulsarOrchestrator
+from pulsar.semantic import SemanticMemory
 from pulsar.router import ModelRouter
-from pulsar.schemas import ChatCompletionRequest, CreateKeyRequest, KnowledgeRequest, ResponseRequest, ToolCallRequest
+from pulsar.schemas import (
+    ChatCompletionRequest,
+    CreateKeyRequest,
+    EmbeddingRequest,
+    KnowledgeRequest,
+    ResearchRequest,
+    ResponseRequest,
+    SemanticMemoryRequest,
+    SemanticSearchRequest,
+    ToolCallRequest,
+)
 from pulsar.security import hash_api_key, new_api_key, secure_equal
 from pulsar.version import __version__
+from pulsar.web_research import WebResearchError, WebSearchClient
 
 
 def approx_tokens(text: str) -> int:
@@ -31,17 +44,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     db = Database(settings.db_path)
     db.init()
     router = ModelRouter(settings)
-    orchestrator = PulsarOrchestrator(router, db, settings.retrieval_limit, settings.max_orchestration_passes)
+    web_search = WebSearchClient(
+        settings.web_search_url,
+        timeout_seconds=settings.web_search_timeout,
+        safesearch=settings.web_search_safesearch,
+    )
+    embeddings = EmbeddingClient(
+        settings.embeddings_base_url,
+        settings.embeddings_api_key,
+        settings.embeddings_model,
+        timeout_seconds=settings.embeddings_timeout,
+        fallback_dimensions=settings.embeddings_fallback_dimensions,
+    )
+    semantic_memory = SemanticMemory(db, embeddings) if settings.enable_semantic_memory else None
+    orchestrator = PulsarOrchestrator(
+        router,
+        db,
+        settings.retrieval_limit,
+        settings.max_orchestration_passes,
+        web_search=web_search,
+        semantic_memory=semantic_memory,
+        semantic_memory_limit=settings.semantic_memory_limit,
+    )
 
     app = FastAPI(
         title="Pulsar AI API",
         version=__version__,
-        description="Pulsar Max orchestration engine + safe tools + document RAG + Pulsar-1 native model + OpenAI-compatible provider routing",
+        description="Pulsar Max orchestration + web research + embeddings + semantic memory + safe tools + document RAG",
     )
     app.state.settings = settings
     app.state.db = db
     app.state.router = router
     app.state.orchestrator = orchestrator
+    app.state.web_search = web_search
+    app.state.embeddings = embeddings
+    app.state.semantic_memory = semantic_memory
 
     if settings.cors_list:
         app.add_middleware(
@@ -83,6 +120,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "pulsar_max_ready": bool(status["ready_providers"] or status["native_checkpoint"]),
             "ready_providers": status["ready_providers"],
             "tools": orchestrator.tools.names(),
+            "web_research_ready": web_search.enabled,
+            "embedding_model": embeddings.active_model,
+            "embedding_external": embeddings.external_enabled,
+            "semantic_memory_enabled": semantic_memory is not None,
         }
 
     @app.get("/", response_class=HTMLResponse)
@@ -105,10 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"object": "list", "data": orchestrator.tools.definitions()}
 
     @app.post("/v1/tools/call")
-    def tool_call(body: ToolCallRequest, key: dict = Depends(require_key)) -> dict:
+    async def tool_call(body: ToolCallRequest, key: dict = Depends(require_key)) -> dict:
         require_permission(key, "tools")
         try:
-            result = orchestrator.tools.execute(body.name, body.arguments)
+            result = await orchestrator.tools.execute_async(body.name, body.arguments)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (ValueError, TypeError, ArithmeticError) as exc:
@@ -116,7 +157,77 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         db.record_usage(key["id"], "/v1/tools/call", body.name, 0, 0, "pulsar-tool", "tool", 1)
         return {"object": "tool.result", "name": result.name, "output": result.output}
 
-    async def execute(messages, model, effort, max_tokens, temperature, conversation_id, verify, enable_tools):
+    @app.post("/v1/embeddings")
+    async def embeddings_endpoint(body: EmbeddingRequest, key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "embeddings")
+        inputs = body.inputs()
+        if not inputs:
+            raise HTTPException(status_code=400, detail="At least one embedding input is required")
+        try:
+            batch = await embeddings.embed(inputs)
+        except (EmbeddingError, ValueError) as exc:
+            raise HTTPException(status_code=502 if isinstance(exc, EmbeddingError) else 400, detail=str(exc)) from exc
+        prompt_tokens = sum(approx_tokens(text) for text in inputs)
+        db.record_usage(
+            key["id"], "/v1/embeddings", batch.model, prompt_tokens, 0,
+            "embedding-provider" if embeddings.external_enabled else "pulsar-local", "embedding", 1,
+        )
+        return {
+            "object": "list",
+            "data": [
+                {"object": "embedding", "embedding": vector, "index": index}
+                for index, vector in enumerate(batch.vectors)
+            ],
+            "model": batch.model,
+            "usage": {"prompt_tokens": prompt_tokens, "total_tokens": prompt_tokens},
+        }
+
+    @app.post("/v1/research/search")
+    async def research_search(body: ResearchRequest, key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "research")
+        if not web_search.enabled:
+            raise HTTPException(status_code=503, detail="Web research is not configured")
+        try:
+            results = await web_search.search(body.query, limit=body.limit, time_range=body.time_range)
+        except (WebResearchError, ValueError) as exc:
+            raise HTTPException(status_code=502 if isinstance(exc, WebResearchError) else 400, detail=str(exc)) from exc
+        db.record_usage(key["id"], "/v1/research/search", "pulsar-web", approx_tokens(body.query), 0, "web-search", "research", 1)
+        return {"object": "search.results", "query": body.query, "data": [item.as_dict() for item in results]}
+
+    @app.post("/v1/memory")
+    async def memory_store(body: SemanticMemoryRequest, key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "memory")
+        if semantic_memory is None:
+            raise HTTPException(status_code=503, detail="Semantic memory is disabled")
+        try:
+            memory_id = await semantic_memory.remember(body.namespace, body.source, body.content)
+        except EmbeddingError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        db.record_usage(key["id"], "/v1/memory", embeddings.active_model, approx_tokens(body.content), 0, "semantic-memory", "memory", 1)
+        return {"object": "memory", "id": memory_id, "namespace": body.namespace, "stored": bool(memory_id)}
+
+    @app.post("/v1/memory/search")
+    async def memory_search(body: SemanticSearchRequest, key: dict = Depends(require_key)) -> dict:
+        require_permission(key, "memory")
+        if semantic_memory is None:
+            raise HTTPException(status_code=503, detail="Semantic memory is disabled")
+        try:
+            hits = await semantic_memory.search(body.namespace, body.query, limit=body.limit)
+        except EmbeddingError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        db.record_usage(key["id"], "/v1/memory/search", embeddings.active_model, approx_tokens(body.query), 0, "semantic-memory", "memory", 1)
+        return {
+            "object": "memory.search",
+            "namespace": body.namespace,
+            "data": [
+                {"id": hit.id, "source": hit.source, "content": hit.content, "score": hit.score, "created_at": hit.created_at}
+                for hit in hits
+            ],
+        }
+
+    async def execute(
+        messages, model, effort, max_tokens, temperature, conversation_id, verify, enable_tools, enable_web_search
+    ):
         try:
             return await orchestrator.run(
                 messages=messages,
@@ -127,6 +238,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 conversation_id=conversation_id,
                 verify=verify,
                 enable_tools=enable_tools,
+                enable_web_search=enable_web_search,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -136,6 +248,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/v1/chat/completions")
     async def chat_completions(body: ChatCompletionRequest, key: dict = Depends(require_key)):
         require_permission(key, "chat")
+        if body.enable_web_search:
+            require_permission(key, "research")
 
         prompt_text = "\n".join(m.content for m in body.messages)
         prompt_tokens = approx_tokens(prompt_text)
@@ -143,7 +257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         created = int(time.time())
         result = await execute(
             body.messages, body.model, body.reasoning_effort, body.max_tokens,
-            body.temperature, body.conversation_id, body.verify, body.enable_tools,
+            body.temperature, body.conversation_id, body.verify, body.enable_tools, body.enable_web_search,
         )
         completion_tokens = approx_tokens(result.text)
         db.record_usage(
@@ -180,6 +294,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reasoning_effort": result.effort,
                 "passes": result.passes,
                 "retrieved_chunks": result.retrieved_chunks,
+                "semantic_memories": result.semantic_memories,
+                "web_results": result.web_results,
                 "tools_used": result.tools_used,
             },
             "system_fingerprint": f"pulsar-ai-v{__version__}",
@@ -188,11 +304,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/v1/responses")
     async def responses(body: ResponseRequest, key: dict = Depends(require_key)) -> dict:
         require_permission(key, "chat")
+        if body.enable_web_search:
+            require_permission(key, "research")
         messages = body.as_messages()
         prompt_text = "\n".join(m.content for m in messages)
         result = await execute(
             messages, body.model, body.reasoning, body.max_output_tokens,
-            body.temperature, body.conversation_id, body.verify, body.enable_tools,
+            body.temperature, body.conversation_id, body.verify, body.enable_tools, body.enable_web_search,
         )
         input_tokens = approx_tokens(prompt_text)
         output_tokens = approx_tokens(result.text)
@@ -214,6 +332,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "reasoning_effort": result.effort,
                 "passes": result.passes,
                 "retrieved_chunks": result.retrieved_chunks,
+                "semantic_memories": result.semantic_memories,
+                "web_results": result.web_results,
                 "route_score": result.route_score,
                 "tools_used": result.tools_used,
             },
@@ -225,7 +345,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/admin/api-keys", dependencies=[Depends(require_admin)])
     def admin_create_key(body: CreateKeyRequest) -> dict:
-        allowed_permissions = {"chat", "models", "usage", "knowledge", "tools", "*"}
+        allowed_permissions = {"chat", "models", "usage", "knowledge", "tools", "embeddings", "research", "memory", "*"}
         bad = [p for p in body.permissions if p not in allowed_permissions]
         if bad:
             raise HTTPException(status_code=400, detail=f"Unknown permissions: {bad}")

@@ -9,6 +9,7 @@ from typing import Any
 
 from pulsar.db import Database
 from pulsar.retrieval import KnowledgeRetriever
+from pulsar.web_research import WebSearchClient
 
 
 @dataclass(slots=True)
@@ -81,16 +82,17 @@ def calculate(expression: str) -> ToolResult:
 class SafeToolRegistry:
     """Small, auditable server-side tool registry.
 
-    Pulsar deliberately ships only non-destructive tools by default. Network,
-    shell, filesystem-write and device-control tools must be added separately
-    with explicit policy/permission boundaries.
+    Pulsar deliberately ships only non-destructive tools by default. Optional
+    web search is read-only and must be configured explicitly. Shell execution,
+    filesystem writes and device control are not enabled here.
     """
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, web_search: WebSearchClient | None = None):
         self.retriever = KnowledgeRetriever(db)
+        self.web_search = web_search
 
     def definitions(self) -> list[dict[str, Any]]:
-        return [
+        items = [
             {
                 "type": "function",
                 "function": {
@@ -123,9 +125,53 @@ class SafeToolRegistry:
                 },
             },
         ]
+        if self.web_search and self.web_search.enabled:
+            items.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": (
+                            "Search the public web through Pulsar's configured SearXNG-compatible search service. "
+                            "Returns result titles, URLs and snippets; it does not open result pages."
+                        ),
+                        "strict": True,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string"},
+                                "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                                "time_range": {
+                                    "type": "string",
+                                    "enum": ["day", "month", "year"],
+                                },
+                            },
+                            "required": ["query"],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+        return items
 
     def names(self) -> list[str]:
         return [d["function"]["name"] for d in self.definitions()]
+
+    async def execute_async(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        if name == "web_search":
+            if not self.web_search or not self.web_search.enabled:
+                raise LookupError("Web search is not configured")
+            query = str(arguments.get("query", "")).strip()
+            if not query:
+                raise ValueError("query is required")
+            limit = min(10, max(1, int(arguments.get("limit", 5))))
+            time_range = arguments.get("time_range")
+            results = await self.web_search.search(query, limit=limit, time_range=time_range)
+            return ToolResult(
+                name="web_search",
+                output=json.dumps([item.as_dict() for item in results], ensure_ascii=False),
+            )
+        return self.execute(name, arguments)
 
     def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         if name == "calculator":

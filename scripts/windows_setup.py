@@ -124,6 +124,19 @@ def intelligence() -> None:
         print(f"[{'READY' if (ROOT / checkpoint).exists() else 'MISSING'}] Native Pulsar-1 checkpoint: {checkpoint}")
     else:
         print("[INFO] Native Pulsar-1 checkpoint not configured.")
+
+    lines = _read_env(ENV_PATH)
+    web_url = _get_value(lines, "PULSAR_WEB_SEARCH_URL") or ""
+    embed_url = _get_value(lines, "PULSAR_EMBEDDINGS_BASE_URL") or ""
+    embed_model = _get_value(lines, "PULSAR_EMBEDDINGS_MODEL") or ""
+    semantic = (_get_value(lines, "PULSAR_ENABLE_SEMANTIC_MEMORY") or "true").lower() in {"1", "true", "yes", "on"}
+    print(f"[{'READY' if web_url else 'INFO'}] Web research: {web_url or 'not configured'}")
+    if embed_url and embed_model:
+        print(f"[READY] External embeddings: {embed_model} @ {embed_url}")
+    else:
+        print("[READY] Embeddings: offline pulsar-embed-lite fallback")
+    print(f"[{'READY' if semantic else 'INFO'}] Semantic memory: {'enabled' if semantic else 'disabled'}")
+
     print("\nPulsar Max modes: pulsar-fast, pulsar-standard, pulsar-think, pulsar-deep, pulsar-max")
     print("Note: frontier-level quality depends on the quality of the configured backend model(s).")
 
@@ -150,6 +163,12 @@ def doctor() -> None:
             checks.append(("model checkpoint", True, "optional; Pulsar Max can route to configured providers"))
         provider_path = _local_provider_config()
         checks.append(("provider config", True, str(provider_path) if provider_path.exists() else "not configured yet (optional)"))
+        web_url = _get_value(lines, "PULSAR_WEB_SEARCH_URL") or ""
+        checks.append(("web research", True, web_url or "not configured (optional)"))
+        embed_url = _get_value(lines, "PULSAR_EMBEDDINGS_BASE_URL") or ""
+        embed_model = _get_value(lines, "PULSAR_EMBEDDINGS_MODEL") or ""
+        embedding_detail = f"{embed_model} @ {embed_url}" if embed_url and embed_model else "offline pulsar-embed-lite"
+        checks.append(("embeddings", True, embedding_detail))
 
     failed = False
     print("\nPulsar AI Doctor")
