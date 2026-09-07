@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pulsar.db import Database
+from pulsar.retrieval import KnowledgeRetriever
 from pulsar.router import ModelRouter, RouteDecision
 from pulsar.schemas import Message
 
@@ -34,6 +35,7 @@ class PulsarOrchestrator:
     def __init__(self, router: ModelRouter, db: Database, retrieval_limit: int = 4, max_passes: int = 5):
         self.router = router
         self.db = db
+        self.retriever = KnowledgeRetriever(db)
         self.retrieval_limit = max(0, retrieval_limit)
         self.max_passes = max(1, max_passes)
 
@@ -53,7 +55,7 @@ class PulsarOrchestrator:
                 context_parts.append("Relevant conversation memory:\n" + rendered)
 
         if latest and self.retrieval_limit:
-            chunks = self.db.search_knowledge(latest, limit=self.retrieval_limit)
+            chunks = self.retriever.search(latest, limit=self.retrieval_limit)
             if chunks:
                 rendered = "\n\n".join(f"[{c['source']}] {c['content']}" for c in chunks)
                 context_parts.append("Retrieved knowledge:\n" + rendered)
